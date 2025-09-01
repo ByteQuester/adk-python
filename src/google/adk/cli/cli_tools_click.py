@@ -516,7 +516,7 @@ def cli_eval(
   print("Eval Run Summary")
   for eval_set_id, pass_fail_count in eval_run_summary.items():
     print(
-        f"{eval_set_id}:\n  Tests passed: {pass_fail_count[0]}\n  Tests"
+        f"{eval_set_id}:\n  Tests passed: {pass_fail_count[0]}\n  Tests" 
         f" failed: {pass_fail_count[1]}"
     )
 
@@ -714,8 +714,16 @@ def fast_api_common_options():
     ),
     default=os.getcwd,
 )
+@click.option(
+    "--web_assets_dir",
+    type=click.Path(
+        exists=True, dir_okay=True, file_okay=False, resolve_path=True
+    ),
+    help="Optional. The directory of the web assets to serve.",
+)
 def cli_web(
     agents_dir: str,
+    web_assets_dir: Optional[str] = None,
     eval_storage_uri: Optional[str] = None,
     log_level: str = "INFO",
     allow_origins: Optional[list[str]] = None,
@@ -730,7 +738,9 @@ def cli_web(
     artifact_storage_uri: Optional[str] = None,  # Deprecated
     a2a: bool = False,
     reload_agents: bool = False,
+    web: bool = False,
 ):
+  print(f"cli_web called with web={web}")
   """Starts a FastAPI server with Web UI for agents.
 
   AGENTS_DIR: The directory of agents, where each sub-directory is a single
@@ -748,7 +758,7 @@ def cli_web(
         f"""
 +-----------------------------------------------------------------------------+
 | ADK Web Server started                                                      |
-|                                                                             |
+|
 | For local testing, access at http://{host}:{port}.{" "*(29 - len(str(port)))}|
 +-----------------------------------------------------------------------------+
 """,
@@ -774,6 +784,7 @@ def cli_web(
       eval_storage_uri=eval_storage_uri,
       allow_origins=allow_origins,
       web=True,
+      web_assets_dir=web_assets_dir,
       trace_to_cloud=trace_to_cloud,
       lifespan=_lifespan,
       a2a=a2a,

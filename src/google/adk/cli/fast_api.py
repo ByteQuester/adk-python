@@ -62,13 +62,14 @@ def get_fast_api_app(
     memory_service_uri: Optional[str] = None,
     eval_storage_uri: Optional[str] = None,
     allow_origins: Optional[list[str]] = None,
-    web: bool,
+    web_assets_dir: Optional[str] = None,
     a2a: bool = False,
     host: str = "127.0.0.1",
     port: int = 8000,
     trace_to_cloud: bool = False,
     reload_agents: bool = False,
     lifespan: Optional[Lifespan[FastAPI]] = None,
+    web: bool = False
 ) -> FastAPI:
   # Set up eval managers.
   if eval_storage_uri:
@@ -231,7 +232,11 @@ def get_fast_api_app(
         tear_down_observer=tear_down_observer,
     )
 
-  if web:
+  if web_assets_dir:
+    extra_fast_api_args.update(
+        web_assets_dir=web_assets_dir,
+    )
+  elif web:
     BASE_DIR = Path(__file__).parent.resolve()
     ANGULAR_DIST_PATH = BASE_DIR / "browser"
     extra_fast_api_args.update(
