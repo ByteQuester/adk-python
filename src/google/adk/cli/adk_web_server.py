@@ -1043,6 +1043,15 @@ class AdkWebServer:
       return StreamingResponse(
           event_generator(),
           media_type="text/event-stream",
+          headers={
+              "Cache-Control": "no-cache, no-transform",
+              "Pragma": "no-cache",
+              "Connection": "keep-alive",
+              # Disable proxy buffering (nginx)
+              "X-Accel-Buffering": "no",
+              # Ensure no compression that can coalesce chunks
+              "Content-Encoding": "identity",
+          },
       )
 
     @app.get(
