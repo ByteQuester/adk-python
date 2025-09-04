@@ -69,7 +69,10 @@ def get_fast_api_app(
     trace_to_cloud: bool = False,
     reload_agents: bool = False,
     lifespan: Optional[Lifespan[FastAPI]] = None,
-    web: bool = False
+    web: bool = False,
+    require_auth: bool = False,
+    jwks_url: Optional[str] = None,
+    free_runs_limit: Optional[int] = None,
 ) -> FastAPI:
   # Set up eval managers.
   if eval_storage_uri:
@@ -246,6 +249,9 @@ def get_fast_api_app(
   app = adk_web_server.get_fast_api_app(
       lifespan=lifespan,
       allow_origins=allow_origins,
+      require_auth=require_auth,
+      jwks_url=jwks_url,
+      free_runs_limit=free_runs_limit,
       **extra_fast_api_args,
   )
 

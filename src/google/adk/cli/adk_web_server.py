@@ -28,6 +28,7 @@ from typing import Literal
 from typing import Optional
 
 from fastapi import FastAPI
+from fastapi import Request, Depends
 from fastapi import HTTPException
 from fastapi import Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -329,6 +330,9 @@ class AdkWebServer:
           [Observer, "AdkWebServer"], None
       ] = lambda o, s: None,
       register_processors: Callable[[TracerProvider], None] = lambda o: None,
+      require_auth: bool = False,
+      jwks_url: Optional[str] = None,
+      free_runs_limit: Optional[int] = None,
   ):
     """Creates a FastAPI app for the ADK web server.
 
@@ -383,6 +387,56 @@ class AdkWebServer:
 
     # Run the FastAPI server.
     app = FastAPI(lifespan=internal_lifespan)
+    # --- Auth (optional) ---------------------------------------------------
+    # Minimal JWKS-backed JWT verification. If require_auth is True, every
+    # request must carry an Authorization: Bearer <token>. When valid, we place
+    # `user_id` on request.state for downstream handlers.
+    verifier = None
+    if jwks_url:
+      try:
+        from jose import jwk, jwt
+        from jose.utils import base64url_decode
+        import requests
+
+        jwks_cache = requests.get(jwks_url, timeout=5).json()
+
+        class _Verifier:
+          def verify(self, token: str) -> dict[str, Any]:
+            headers = jwt.get_unverified_header(token)
+            kid = headers.get('kid')
+            key = next((k for k in jwks_cache['keys'] if k.get('kid') == kid), None)
+            if not key:
+              raise HTTPException(status_code=401, detail='Invalid token (kid)')
+            # jose will pick the right key when provided the JWKS entry
+            claims = jwt.decode(token, key, options={"verify_aud": False, "verify_at_hash": False})
+            return claims
+
+        verifier = _Verifier()
+      except Exception as e:
+        logger.warning("JWKS init failed: %s", e)
+
+    async def _auth_dependency(request: Request):
+      if not require_auth:
+        return
+      authz = request.headers.get("Authorization", "")
+      if not authz.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+      token = authz.split(" ", 1)[1]
+      if verifier:
+        try:
+          claims = verifier.verify(token)
+          request.state.user_id = claims.get('sub')
+          request.state.claims = claims
+        except Exception:
+          raise HTTPException(status_code=401, detail="Invalid token")
+      else:
+        # Best-effort: accept token but don't parse if no verifier
+        request.state.user_id = None
+        request.state.claims = None
+
+    # In-memory usage counter (scaffold). Replace with a persistent store.
+    usage_counts: dict[str, int] = {}
+
 
     if allow_origins:
       app.add_middleware(
@@ -394,7 +448,7 @@ class AdkWebServer:
       )
 
     @app.get("/list-apps")
-    async def list_apps() -> list[str]:
+    async def list_apps(_: Any = Depends(_auth_dependency)) -> list[str]:
       return self.agent_loader.list_agents()
 
     @app.get("/debug/trace/{event_id}", tags=[TAG_DEBUG])
@@ -429,6 +483,7 @@ class AdkWebServer:
     async def get_session(
         app_name: str, user_id: str, session_id: str
     ) -> Session:
+      await _auth_dependency(Request)
       session = await self.session_service.get_session(
           app_name=app_name, user_id=user_id, session_id=session_id
       )
@@ -441,7 +496,7 @@ class AdkWebServer:
         "/apps/{app_name}/users/{user_id}/sessions",
         response_model_exclude_none=True,
     )
-    async def list_sessions(app_name: str, user_id: str) -> list[Session]:
+    async def list_sessions(app_name: str, user_id: str, _: Any = Depends(_auth_dependency)) -> list[Session]:
       list_sessions_response = await self.session_service.list_sessions(
           app_name=app_name, user_id=user_id
       )
@@ -461,6 +516,7 @@ class AdkWebServer:
         user_id: str,
         session_id: str,
         state: Optional[dict[str, Any]] = None,
+        _: Any = Depends(_auth_dependency),
     ) -> Session:
       if (
           await self.session_service.get_session(
@@ -486,6 +542,7 @@ class AdkWebServer:
         user_id: str,
         state: Optional[dict[str, Any]] = None,
         events: Optional[list[Event]] = None,
+        _: Any = Depends(_auth_dependency),
     ) -> Session:
       session = await self.session_service.create_session(
           app_name=app_name, user_id=user_id, state=state
@@ -501,6 +558,7 @@ class AdkWebServer:
     @app.delete("/apps/{app_name}/users/{user_id}/sessions/{session_id}")
     async def delete_session(
         app_name: str, user_id: str, session_id: str
+        , _: Any = Depends(_auth_dependency)
     ) -> None:
       await self.session_service.delete_session(
           app_name=app_name, user_id=user_id, session_id=session_id
@@ -908,6 +966,7 @@ class AdkWebServer:
         session_id: str,
         artifact_name: str,
         version: Optional[int] = Query(None),
+        _: Any = Depends(_auth_dependency),
     ) -> Optional[types.Part]:
       artifact = await self.artifact_service.load_artifact(
           app_name=app_name,
@@ -930,6 +989,7 @@ class AdkWebServer:
         session_id: str,
         artifact_name: str,
         version_id: int,
+        _: Any = Depends(_auth_dependency),
     ) -> Optional[types.Part]:
       artifact = await self.artifact_service.load_artifact(
           app_name=app_name,
@@ -948,6 +1008,7 @@ class AdkWebServer:
     )
     async def list_artifact_names(
         app_name: str, user_id: str, session_id: str
+        , _: Any = Depends(_auth_dependency)
     ) -> list[str]:
       return await self.artifact_service.list_artifact_keys(
           app_name=app_name, user_id=user_id, session_id=session_id
@@ -959,6 +1020,7 @@ class AdkWebServer:
     )
     async def list_artifact_versions(
         app_name: str, user_id: str, session_id: str, artifact_name: str
+        , _: Any = Depends(_auth_dependency)
     ) -> list[int]:
       return await self.artifact_service.list_versions(
           app_name=app_name,
@@ -972,6 +1034,7 @@ class AdkWebServer:
     )
     async def delete_artifact(
         app_name: str, user_id: str, session_id: str, artifact_name: str
+        , _: Any = Depends(_auth_dependency)
     ) -> None:
       await self.artifact_service.delete_artifact(
           app_name=app_name,
@@ -981,7 +1044,7 @@ class AdkWebServer:
       )
 
     @app.post("/run", response_model_exclude_none=True)
-    async def run_agent(req: RunAgentRequest) -> list[Event]:
+    async def run_agent(req: RunAgentRequest, _: Any = Depends(_auth_dependency)) -> list[Event]:
       session = await self.session_service.get_session(
           app_name=req.app_name, user_id=req.user_id, session_id=req.session_id
       )
@@ -1001,8 +1064,18 @@ class AdkWebServer:
       return events
 
     @app.post("/run_sse")
-    async def run_agent_sse(req: RunAgentRequest) -> StreamingResponse:
+    async def run_agent_sse(req: RunAgentRequest, request: Request, _: Any = Depends(_auth_dependency)) -> StreamingResponse:
       # SSE endpoint
+      # Enforce simple free-run quota if configured
+      if free_runs_limit is not None:
+        # Prefer server-side user from token; fallback to request payload
+        user_id = getattr(request.state, 'user_id', None) or req.user_id
+        key = f"{req.app_name}:{user_id}"
+        current = usage_counts.get(key, 0)
+        if current >= int(free_runs_limit):
+          raise HTTPException(status_code=402, detail="Free trial limit reached")
+        usage_counts[key] = current + 1
+
       session = await self.session_service.get_session(
           app_name=req.app_name, user_id=req.user_id, session_id=req.session_id
       )

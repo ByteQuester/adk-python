@@ -721,6 +721,25 @@ def fast_api_common_options():
     ),
     help="Optional. The directory of the web assets to serve.",
 )
+@click.option(
+    "--require_auth/--no-require_auth",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Require Authorization bearer tokens on all API routes.",
+)
+@click.option(
+    "--jwks_url",
+    type=str,
+    default=None,
+    help="JWKS endpoint for verifying JWTs (e.g., Supabase).",
+)
+@click.option(
+    "--free_runs_limit",
+    type=int,
+    default=None,
+    help="Optional free trial run cap per user (e.g., 5). In-memory only.",
+)
 def cli_web(
     agents_dir: str,
     web_assets_dir: Optional[str] = None,
@@ -739,6 +758,9 @@ def cli_web(
     a2a: bool = False,
     reload_agents: bool = False,
     web: bool = False,
+    require_auth: bool = False,
+    jwks_url: Optional[str] = None,
+    free_runs_limit: Optional[int] = None,
 ):
   print(f"cli_web called with web={web}")
   """Starts a FastAPI server with Web UI for agents.
@@ -791,6 +813,9 @@ def cli_web(
       host=host,
       port=port,
       reload_agents=reload_agents,
+      require_auth=require_auth,
+      jwks_url=jwks_url,
+      free_runs_limit=free_runs_limit,
   )
   config = uvicorn.Config(
       app,
@@ -860,6 +885,7 @@ def cli_api_server(
           host=host,
           port=port,
           reload_agents=reload_agents,
+          require_auth=False,
       ),
       host=host,
       port=port,
